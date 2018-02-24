@@ -51,6 +51,11 @@ public:
     return std::experimental::suspend_always();
   }
 
+  void unhandled_exception()
+  {
+    pending_exception_ = std::current_exception();
+  }
+
   void set_exception(std::exception_ptr ex)
   {
     pending_exception_ = ex;
@@ -69,7 +74,7 @@ public:
   void release()
   {
     if (--ref_count_ == 0)
-      coroutine_handle<awaiter>::from_promise(this).destroy();
+      coroutine_handle<awaiter>::from_promise(*this).destroy();
   }
 
   void rethrow_exception()
@@ -130,6 +135,12 @@ public:
     return final_suspender{this};
   }
 
+  void unhandled_exception()
+  {
+    pending_exception_ = std::current_exception();
+    ready_ = true;
+  }
+
   void set_exception(std::exception_ptr e)
   {
     pending_exception_ = e;
@@ -140,6 +151,16 @@ public:
   {
     if (caller_)
       caller_.resume();
+  }
+
+  bool ready()
+  {
+    return ready_;
+  }
+
+  void set_caller(coroutine_handle<void> h)
+  {
+    caller_ = h;
   }
 
 protected:
@@ -194,7 +215,7 @@ public:
 
 private:
   template <typename> friend class awaitable;
-  unsigned char buf_[sizeof(T)] alignas(T);
+  alignas(T) unsigned char buf_[sizeof(T)];
   bool initialised_ = false;
 };
 
@@ -236,7 +257,7 @@ template <typename T>
 awaitable<T> make_dummy_awaitable()
 {
   for (;;) co_await std::experimental::suspend_always();
-  return dummy_return<T>();
+  co_return dummy_return<T>();
 }
 
 #if defined(_MSC_VER)
@@ -314,12 +335,12 @@ template <typename Executor>
 class spawn_handler : public awaiter_task<Executor>
 {
 public:
-  using awaiter_task::awaiter_task;
+  using awaiter_task<Executor>::awaiter_task;
 
   void operator()()
   {
-    awaiter_ptr ptr(std::move(awaiter_));
-    coroutine_handle<awaiter>::from_promise(ptr.get()).resume();
+    awaiter_ptr ptr(std::move(this->awaiter_));
+    coroutine_handle<awaiter>::from_promise(*ptr).resume();
   }
 };
 
@@ -354,13 +375,13 @@ class await_handler<Executor>
   : public await_handler_base<Executor, void>
 {
 public:
-  using await_handler_base::await_handler_base;
+  using await_handler_base<Executor, void>::await_handler_base;
 
   void operator()()
   {
-    awaiter_ptr ptr(std::move(awaiter_));
-    awaitee_->return_void();
-    awaitee_->wake_caller();
+    awaiter_ptr ptr(std::move(this->awaiter_));
+    this->awaitee_->return_void();
+    this->awaitee_->wake_caller();
     ptr->rethrow_exception();
   }
 };
@@ -372,16 +393,16 @@ class await_handler<Executor, error_code>
 public:
   typedef void return_type;
 
-  using await_handler_base::await_handler_base;
+  using await_handler_base<Executor, void>::await_handler_base;
 
   void operator()(error_code ec)
   {
-    awaiter_ptr ptr(std::move(awaiter_));
+    awaiter_ptr ptr(std::move(this->awaiter_));
     if (ec)
-      awaitee_->set_exception(std::make_exception_ptr(system_error(ec)));
+      this->awaitee_->set_exception(std::make_exception_ptr(system_error(ec)));
     else
-      awaitee_->return_void();
-    awaitee_->wake_caller();
+      this->awaitee_->return_void();
+    this->awaitee_->wake_caller();
     ptr->rethrow_exception();
   }
 };
@@ -391,16 +412,16 @@ class await_handler<Executor, std::exception_ptr>
   : public await_handler_base<Executor, void>
 {
 public:
-  using await_handler_base::await_handler_base;
+  using await_handler_base<Executor, void>::await_handler_base;
 
   void operator()(std::exception_ptr ex)
   {
-    awaiter_ptr ptr(std::move(awaiter_));
+    awaiter_ptr ptr(std::move(this->awaiter_));
     if (ex)
-      awaitee_->set_exception(ex);
+      this->awaitee_->set_exception(ex);
     else
-      awaitee_->return_void();
-    awaitee_->wake_caller();
+      this->awaitee_->return_void();
+    this->awaitee_->wake_caller();
     ptr->rethrow_exception();
   }
 };
@@ -410,13 +431,13 @@ class await_handler<Executor, T>
   : public await_handler_base<Executor, T>
 {
 public:
-  using await_handler_base::await_handler_base;
+  using await_handler_base<Executor, T>::await_handler_base;
 
   void operator()(T t)
   {
-    awaiter_ptr ptr(std::move(awaiter_));
-    awaitee_->return_value(std::forward<T>(t));
-    awaitee_->wake_caller();
+    awaiter_ptr ptr(std::move(this->awaiter_));
+    this->awaitee_->return_value(std::forward<T>(t));
+    this->awaitee_->wake_caller();
     ptr->rethrow_exception();
   }
 };
@@ -426,16 +447,16 @@ class await_handler<Executor, error_code, T>
   : public await_handler_base<Executor, T>
 {
 public:
-  using await_handler_base::await_handler_base;
+  using await_handler_base<Executor, T>::await_handler_base;
 
   void operator()(error_code ec, T t)
   {
-    awaiter_ptr ptr(std::move(awaiter_));
+    awaiter_ptr ptr(std::move(this->awaiter_));
     if (ec)
-      awaitee_->set_exception(std::make_exception_ptr(system_error(ec)));
+      this->awaitee_->set_exception(std::make_exception_ptr(system_error(ec)));
     else
-      awaitee_->return_value(std::forward<T>(t));
-    awaitee_->wake_caller();
+      this->awaitee_->return_value(std::forward<T>(t));
+    this->awaitee_->wake_caller();
     ptr->rethrow_exception();
   }
 };
@@ -445,16 +466,16 @@ class await_handler<Executor, std::exception_ptr, T>
   : public await_handler_base<Executor, T>
 {
 public:
-  using await_handler_base::await_handler_base;
+  using await_handler_base<Executor, T>::await_handler_base;
 
   void operator()(std::exception_ptr ex, T t)
   {
-    awaiter_ptr ptr(std::move(awaiter_));
+    awaiter_ptr ptr(std::move(this->awaiter_));
     if (ex)
-      awaitee_->set_exception(ex);
+      this->awaitee_->set_exception(ex);
     else
-      awaitee_->return_value(std::forward<T>(t));
-    awaitee_->wake_caller();
+      this->awaitee_->return_value(std::forward<T>(t));
+    this->awaitee_->wake_caller();
     ptr->rethrow_exception();
   }
 };
@@ -593,7 +614,8 @@ inline auto spawn_reorder(std::index_sequence<> index_seq,
 }
 
 template <typename ArgTypes, std::size_t... Index,
-    typename Executor, typename F, typename CompletionToken>
+    typename Executor, typename F, typename CompletionToken,
+    typename = typename enable_if<sizeof...(Index)>::type>
 inline auto spawn_reorder(std::index_sequence<Index...> index_seq,
     const Executor& ex, F&& f, std::tuple_element_t<Index, ArgTypes>&&... args,
     CompletionToken&& token)
@@ -611,34 +633,34 @@ awaitable<T>::~awaitable()
   {
     detail::coroutine_handle<
       detail::awaitee<T>>::from_promise(
-        awaitee_).destroy();
+        *awaitee_).destroy();
   }
 }
 
 template <typename T>
 inline bool awaitable<T>::await_ready()
 {
-  return awaitee_->ready_;
+  return awaitee_->ready();
 }
 
 template <typename T>
 inline void awaitable<T>::await_suspend(
     detail::coroutine_handle<detail::awaiter> h)
 {
-  awaitee_->caller_ = h;
+  awaitee_->set_caller(h);
 }
 
 template <typename T> template <typename U>
 inline void awaitable<T>::await_suspend(
     detail::coroutine_handle<detail::awaitee<U>> h)
 {
-  awaitee_->caller_ = h;
+  awaitee_->set_caller(h);
 }
 
 template <typename T>
 inline T awaitable<T>::await_resume()
 {
-  awaitee_->caller_ = nullptr;
+  awaitee_->set_caller(nullptr);
   return awaitee_->value();
 }
 

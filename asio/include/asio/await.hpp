@@ -19,19 +19,9 @@
 
 #if defined(ASIO_HAS_CO_AWAIT)
 
-#include <experimental/resumable>
+#include <experimental/coroutine>
 #include "asio/executor.hpp"
 #include "asio/strand.hpp"
-
-#ifndef co_await
-# define co_await await
-#endif
-
-#ifndef co_return
-# define co_return if (0) { \
-    co_await std::experimental::suspend_never(); \
-  } else return
-#endif
 
 #include "asio/detail/push_options.hpp"
 

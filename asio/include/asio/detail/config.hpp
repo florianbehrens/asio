@@ -1156,13 +1156,13 @@
 // Support co_await on compilers known to allow it.
 #if !defined(ASIO_HAS_CO_AWAIT)
 # if !defined(ASIO_DISABLE_CO_AWAIT)
-#  if defined(ASIO_MSVC)
-#   if (_MSC_FULL_VER >= 190023506)
-#    if defined(_RESUMABLE_FUNCTIONS_SUPPORTED)
+#  if (defined(ASIO_MSVC) && (_MSC_FULL_VER >= 190023506) \
+     && defined(_RESUMABLE_FUNCTIONS_SUPPORTED)) \
+     || (defined(ASIO_HAS_CLANG_LIBCXX) && defined(__cpp_coroutines))
 #     define ASIO_HAS_CO_AWAIT 1
-#    endif // defined(_RESUMABLE_FUNCTIONS_SUPPORTED)
-#   endif // (_MSC_FULL_VER >= 190023506)
-#  endif // defined(ASIO_MSVC)
+#  endif // (defined(ASIO_MSVC) && (_MSC_FULL_VER >= 190023506)
+         // && defined(_RESUMABLE_FUNCTIONS_SUPPORTED)) \
+         // || (defined(ASIO_HAS_CLANG_LIBCXX) && defined(__cpp_coroutines))
 # endif // !defined(ASIO_DISABLE_CO_AWAIT)
 #endif // !defined(ASIO_HAS_CO_AWAIT)
 
